@@ -1,0 +1,153 @@
+{
+  "entities": {
+    "PlayerAccount": {
+      "title": "PlayerAccount",
+      "description": "Private player profile, one-time company name change state, and serialized game state payload.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Immutable Firebase Auth UID of the player."
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Player display name."
+        },
+        "companyName": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 60,
+          "description": "Name of the shipping company."
+        },
+        "companyNameChangeUsed": {
+          "type": "boolean",
+          "description": "True once the player has used their single permitted company name change."
+        },
+        "saveVersion": {
+          "type": "number",
+          "description": "Save schema version number."
+        },
+        "currentDay": {
+          "type": "number",
+          "description": "Current day in the simulation."
+        },
+        "cashPiastres": {
+          "type": "number",
+          "description": "Available cash balance in piastres."
+        },
+        "gameState": {
+          "type": "object",
+          "description": "Native structured map of the player's complete simulation state."
+        },
+        "stagingGameState": {
+          "type": "object",
+          "description": "Optional staging simulation state for admin candidate testing."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last save."
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "companyName",
+        "companyNameChangeUsed",
+        "saveVersion",
+        "currentDay",
+        "cashPiastres",
+        "gameState",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PlayerPrivateInfo": {
+      "title": "PlayerPrivateInfo",
+      "description": "Isolated PII document storing the player's verified email address.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "ReleaseControl": {
+      "title": "ReleaseControl",
+      "description": "Global release management state separating public approved version from admin candidate version.",
+      "type": "object",
+      "properties": {
+        "publicVersion": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "publicSummary": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "candidateVersion": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "candidateSummary": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "approvedByEmail": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "history": {
+          "type": "array",
+          "description": "Bounded list (max 20) of approved release snapshots for rollback."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "publicVersion",
+        "publicSummary",
+        "candidateVersion",
+        "candidateSummary",
+        "approvedByEmail",
+        "history",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/players/{userId}": {
+      "schema": { "$ref": "#/entities/PlayerAccount" },
+      "description": "Player account and simulation state isolated strictly per authenticated user."
+    },
+    "/players/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/PlayerPrivateInfo" },
+      "description": "Isolated PII subcollection for player email."
+    },
+    "/release_control/{configId}": {
+      "schema": { "$ref": "#/entities/ReleaseControl" },
+      "description": "Global release control metadata readable by players and writable strictly by verified admin."
+    }
+  }
+}

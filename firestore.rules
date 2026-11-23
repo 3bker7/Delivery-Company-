@@ -1,0 +1,219 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'a7med3bker@gmail.com'
+      );
+    }
+
+    // 3. Entity Validation Blueprints (Anti-Update-Gap)
+    function isValidPlayerAccount(data) {
+      return data.keys().hasAll([
+        'uid',
+        'displayName',
+        'companyName',
+        'companyNameChangeUsed',
+        'saveVersion',
+        'currentDay',
+        'cashPiastres',
+        'gameState',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'uid',
+        'displayName',
+        'companyName',
+        'companyNameChangeUsed',
+        'saveVersion',
+        'currentDay',
+        'cashPiastres',
+        'gameState',
+        'stagingGameState',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.uid == request.auth.uid &&
+      data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+      data.companyName is string && data.companyName.size() >= 3 && data.companyName.size() <= 60 &&
+      data.companyNameChangeUsed is bool &&
+      data.saveVersion is int && data.saveVersion >= 1 && data.saveVersion <= 100 &&
+      data.currentDay is int && data.currentDay >= 1 && data.currentDay <= 10000 &&
+      data.cashPiastres is int && data.cashPiastres >= 0 && data.cashPiastres <= 100000000000 &&
+      data.gameState is map &&
+      (!('stagingGameState' in data) || data.stagingGameState is map) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidPlayerPrivateInfo(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+      data.keys().hasOnly(['uid', 'email', 'createdAt']) &&
+      data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.uid == request.auth.uid &&
+      data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+      data.createdAt is timestamp;
+    }
+
+    function isValidReleaseControl(data) {
+      return data.keys().hasAll([
+        'publicVersion',
+        'publicSummary',
+        'candidateVersion',
+        'candidateSummary',
+        'approvedByEmail',
+        'history',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'publicVersion',
+        'publicSummary',
+        'candidateVersion',
+        'candidateSummary',
+        'approvedByEmail',
+        'history',
+        'updatedAt'
+      ]) &&
+      data.publicVersion is string && data.publicVersion.size() >= 1 && data.publicVersion.size() <= 32 &&
+      data.publicSummary is string && data.publicSummary.size() >= 1 && data.publicSummary.size() <= 600 &&
+      data.candidateVersion is string && data.candidateVersion.size() >= 1 && data.candidateVersion.size() <= 32 &&
+      data.candidateSummary is string && data.candidateSummary.size() >= 1 && data.candidateSummary.size() <= 600 &&
+      data.approvedByEmail is string && data.approvedByEmail.size() >= 3 && data.approvedByEmail.size() <= 160 &&
+      data.history is list && data.history.size() <= 20 &&
+      (data.history.size() == 0 || data.history[0] is map) &&
+      data.updatedAt is timestamp;
+    }
+
+    // 4. Collection Rules
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list, create, update, delete: if false;
+    }
+
+    match /players/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidPlayerAccount(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidPlayerAccount(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Standard Game Progress Save (companyName and companyNameChangeUsed remain unchanged)
+          (
+            incoming().companyName == existing().companyName &&
+            incoming().companyNameChangeUsed == existing().companyNameChangeUsed &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName',
+              'saveVersion',
+              'currentDay',
+              'cashPiastres',
+              'gameState',
+              'stagingGameState',
+              'updatedAt'
+            ])
+          ) ||
+          // Action 2: One-Time Company Name Change (ONLY allowed when existing().companyNameChangeUsed == false)
+          (
+            existing().companyNameChangeUsed == false &&
+            incoming().companyNameChangeUsed == true &&
+            incoming().companyName != existing().companyName &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'companyName',
+              'companyNameChangeUsed',
+              'gameState',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
+
+      // Isolated PII subcollection with Master Gate relational check
+      match /private/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin()) &&
+          exists(/databases/$(database)/documents/players/$(userId));
+        allow list: if false;
+
+        allow create: if isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(docId) &&
+          docId == 'info' &&
+          isValidPlayerPrivateInfo(incoming()) &&
+          incoming().createdAt == request.time &&
+          existsAfter(/databases/$(database)/documents/players/$(userId));
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /release_control/{configId} {
+      // Any authenticated player or public visitor can read the active release version config
+      allow get: if isValidId(configId) && configId == 'global';
+      allow list: if false;
+
+      allow create: if isAdmin() &&
+        isValidId(configId) &&
+        configId == 'global' &&
+        isValidReleaseControl(incoming()) &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isAdmin() &&
+        isValidId(configId) &&
+        configId == 'global' &&
+        isValidReleaseControl(incoming()) &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'publicVersion',
+          'publicSummary',
+          'candidateVersion',
+          'candidateSummary',
+          'approvedByEmail',
+          'history',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+  }
+}

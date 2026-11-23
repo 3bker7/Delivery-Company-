@@ -1,0 +1,6 @@
+{
+  "name": "شركة الشحن — محاكي إدارة اللوجستيات",
+  "description": "محاكاة إدارية واقتصادية قصصية باللغة العربية حول إدارة شركة شحن محلية في مصر مع نظام محاسبي دقيق وتتبع كامل للشحنات.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
